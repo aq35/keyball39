@@ -1,23 +1,36 @@
 /*
- * Keyball39 カスタムキーマップ 最終版
+ * Keyball39 カスタムキーマップ 最適化版
  * 
- * 【設計方針】
- * 1. 親指+人差し指で超頻繁な括弧を入力
- * 2. ホームポジションから指を離さない設計
- * 3. 使用頻度ベースの最適配置
+ * 【親指キー配置（全て二役）】
+ * 左親指③：Cmd
+ * 左親指④：タップ=Backspace、ホールド=Layer1（記号・ナビ）
+ * 左親指⑤：タップ=Space、ホールド=Layer2（数字テンキー）
+ * 左親指⑥：タップ=Ctrl、ホールド=Layer3（設定）
+ * 右親指①：タップ=Alt、ホールド=Shift
+ * 右親指②：Tab
  * 
- * 【記号使用頻度】
- * 超頻繁：{} () [] : = -
- * 頻繁：_ " ' ; / \
- * やや頻繁：` ~ その他記号
+ * 【特殊配置】
+ * R5中（;の位置）：Enter
  * 
- * 【親指配置】
- * 左：Tab, 英数, Alt, Ctrl, Shift, L1
- * 右：Backspace, Space, [🔴], Enter
+ * 【括弧配置（隣り合わせ）】
+ * Layer 1中段：[ ] ( ) { }
+ * 
+ * 【コンボ】
+ * D+F → 英数⇔かなトグル
  */
 
 #include QMK_KEYBOARD_H
 #include "quantum.h"
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// カスタムキーコード
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+enum custom_keycodes {
+    LANG_TOG = SAFE_RANGE,  // 言語トグル
+};
+
+// 言語状態管理（true=かな、false=英数）
+static bool is_kana_mode = false;
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 // わかりやすいキー名定義
@@ -26,15 +39,12 @@
 // 言語切替
 #define EISU     KC_LNG2      // 英数（Mac）
 #define KANA     KC_LNG1      // かな（Mac）
-#define HANKAKU  KC_GRV       // 半角/全角（Win）
 
-// モディファイア付きキー
-#define CMD_EISU LGUI_T(KC_LNG2)  // 長押しCmd、タップで英数
-#define SPC_CMD  LGUI_T(KC_SPC)   // 長押しCmd、タップでSpace（未使用）
-
-// レイヤー切替
-#define LOWER    MO(1)        // Layer 1（記号・数字）
-#define SETTINGS MO(2)        // Layer 2（設定）
+// タップ/ホールド（親指の二役）
+#define ALT_SFT  LALT_T(KC_LSFT)  // タップ=Alt、ホールド=Shift
+#define SPC_L2   LT(2, KC_SPC)    // タップ=Space、ホールド=Layer2
+#define BSP_L1   LT(1, KC_BSPC)   // タップ=Backspace、ホールド=Layer1
+#define CTL_L3   LT(3, KC_LCTL)   // タップ=Ctrl、ホールド=Layer3
 
 // よく使う記号
 #define BRACK_L  KC_LBRC      // [
@@ -61,48 +71,45 @@
 #define NAV_D    KC_DOWN      // ↓
 
 // その他
-#define ___      _______      // 透過（下のレイヤーのキー）
+#define ___      _______      // 透過
 #define XXX      XXXXXXX      // 無効
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-// 物理キー位置の定義
-// 
-// 【指の割り当て】
-// L5=左小指, L4=左薬指, L3=左中指, L2=左人差指, L1=左親指
-// R1=右親指, R2=右人差指, R3=右中指, R4=右薬指, R5=右小指
-// 
-// 【段の名前】
-// 上段 = Top row (数字・記号)
-// 中段 = Home row (ホームポジション)
-// 下段 = Bottom row
-// 親指 = Thumb cluster
+// コンボ定義
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-// コンボ定義（5個）
 enum combos {
-    HJ_ENT,      // H+J → Enter（トラックボール誤爆防止）
-    QWE_EISU,    // Q+W+E → 英数（Mac）
-    ASD_KANA,    // A+S+D → かな（Mac）
-    ZXC_HZEN,    // Z+X+C → 半角/全角（Win）
-    QW_L2,       // Q+W → Layer 2（押している間）
+    DF_LANG,     // D+F → 言語トグル
     COMBO_LENGTH
 };
 uint16_t COMBO_LEN = COMBO_LENGTH;
 
-// コンボキー定義
-const uint16_t PROGMEM hj_combo[] = {KC_H, KC_J, COMBO_END};
-const uint16_t PROGMEM qwe_combo[] = {KC_Q, KC_W, KC_E, COMBO_END};
-const uint16_t PROGMEM asd_combo[] = {KC_A, KC_S, KC_D, COMBO_END};
-const uint16_t PROGMEM zxc_combo[] = {KC_Z, KC_X, KC_C, COMBO_END};
-const uint16_t PROGMEM qw_combo[] = {KC_Q, KC_W, COMBO_END};
+const uint16_t PROGMEM df_combo[] = {KC_D, KC_F, COMBO_END};
 
 combo_t key_combos[] = {
-    [HJ_ENT]     = COMBO(hj_combo, KC_ENT),
-    [QWE_EISU]   = COMBO(qwe_combo, EISU),
-    [ASD_KANA]   = COMBO(asd_combo, KANA),
-    [ZXC_HZEN]   = COMBO(zxc_combo, HANKAKU),
-    [QW_L2]      = COMBO(qw_combo, SETTINGS),
+    [DF_LANG]    = COMBO(df_combo, LANG_TOG),
 };
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// カスタムキー処理
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+bool process_record_user(uint16_t keycode, keyrecord_t *record) {
+    switch (keycode) {
+        case LANG_TOG:
+            if (record->event.pressed) {
+                // 状態をトグル
+                is_kana_mode = !is_kana_mode;
+                
+                // トグル後の状態に応じてキーを送信
+                if (is_kana_mode) {
+                    tap_code(KANA);  // かなモードへ
+                } else {
+                    tap_code(EISU);  // 英数モードへ
+                }
+            }
+            return false;
+    }
+    return true;
+}
 
 // clang-format off
 const uint16_t PROGMEM keymaps[][MATRIX_ROWS][MATRIX_COLS] = {
@@ -110,10 +117,17 @@ const uint16_t PROGMEM keymaps[][MATRIX_ROWS][MATRIX_COLS] = {
   // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
   // Layer 0: Base（通常入力）
   // 
-  // 【LAYOUT_right_ball】右手にトラックボール
-  // 左手親指（6個）: Bsp, Alt, Cmd/英数, Ctrl, L1, Tab
-  // 右手親指（3個）: Shift, Space, [🔴], Enter
-  // ※ Enter は H+J コンボでも入力可能
+  // 【親指配置】
+  //   左③：Cmd
+  //   左④：タップ=Backspace、ホールド=Layer1
+  //   左⑤：タップ=Space、ホールド=Layer2
+  //   左⑥：タップ=Ctrl、ホールド=Layer3
+  //   右①：タップ=Alt、ホールド=Shift
+  //   右②：Tab
+  // 【特殊配置】
+  //   R5中：Enter（セミコロンの位置）
+  // 【コンボ】
+  //   D+F → 英数⇔かなトグル
   // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
   [0] = LAYOUT_right_ball(
   //╭────────┬────────┬────────┬────────┬────────╮                    ╭────────┬────────┬────────┬────────┬────────╮
@@ -121,81 +135,98 @@ const uint16_t PROGMEM keymaps[][MATRIX_ROWS][MATRIX_COLS] = {
       KC_Q    , KC_W    , KC_E    , KC_R    , KC_T    ,                       KC_Y    , KC_U    , KC_I    , KC_O    , KC_P    ,
   //├────────┼────────┼────────┼────────┼────────┤                    ├────────┼────────┼────────┼────────┼────────┤
   //│  L5中  │  L4中  │  L3中  │  L2中  │  L2中  │                    │  R2中  │  R2中  │  R3中  │  R4中  │  R5中  │
-      KC_A    , KC_S    , KC_D    , KC_F    , KC_G    ,                       KC_H    , KC_J    , KC_K    , KC_L    , KC_SCLN ,
+  //│   A    │   S    │   D    │   F    │   G    │                    │   H    │   J    │   K    │   L    │ Enter  │
+      KC_A    , KC_S    , KC_D    , KC_F    , KC_G    ,                       KC_H    , KC_J    , KC_K    , KC_L    , KC_ENT  ,
   //├────────┼────────┼────────┼────────┼────────┤                    ├────────┼────────┼────────┼────────┼────────┤
   //│  L5下  │  L4下  │  L3下  │  L2下  │  L2下  │                    │  R2下  │  R2下  │  R3下  │  R4下  │  R5下  │
       KC_Z    , KC_X    , KC_C    , KC_V    , KC_B    ,                       KC_N    , KC_M    , KC_COMM , KC_DOT  , KC_SLSH ,
   //╰────────┴────────┴────────┼────────┼────────┼────────╮  ╭────────┼────────┼────────┴────────┴────────┴────────╯
   //                            │  L1①  │  L1②  │  L1③  │  │  R1①  │  R1②  │
-                                  KC_BSPC , KC_LALT , CMD_EISU,          KC_LSFT , KC_SPC  ,
+  //                            │  無効  │  無効  │  Cmd   │  │Alt/Sft│  Tab   │
+                                  XXX     , XXX     , KC_LGUI ,          ALT_SFT , KC_TAB  ,
   //                            ├────────┼────────┼────────┤  ├────────┼────────┤
   //                            │  L1④  │  L1⑤  │  L1⑥  │  │        │  R1③  │
-                                            KC_LCTL , LOWER   , KC_TAB  ,          KC_ENT
+  //                            │Bsp/L1  │Spc/L2 │Ctl/L3 │  │        │  無効  │
+                                            BSP_L1  , SPC_L2  , CTL_L3  ,          XXX
   //                            ╰────────┴────────┴────────╯  ╰────────┴────────╯
   ),
 
   // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-  // Layer 1: Lower（数字・記号・ナビゲーション）
+  // Layer 1: 記号・ナビゲーション（左親指④でアクティブ）
   // 
-  // 【配置戦略】
-  // - 数字：左手上段1-5、右手上段6-0
-  // - 超頻繁な括弧：人差し指ホーム
-  //   {} → L1 + FJ、() → L1 + DK、[] → L1 + SL
-  // - ナビゲーション：右手下段（矢印）、左手下段（ページ）
+  // 【設計】左手でレイヤー保持、右手で操作
+  // - 右手上段：カーソルキー（U=←、I=↑、O=→）
+  // - 右手中段：括弧類（隣り合わせ）
+  //   H: [  J: ]  K: (  L: )  Enter位置: { R1①: }
+  // - 右手下段：補助記号
   // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
   [1] = LAYOUT_right_ball(
   //╭────────┬────────┬────────┬────────┬────────╮                    ╭────────┬────────┬────────┬────────┬────────╮
-  //│  L5上  │  L4上  │  L3上  │  L2上  │  L2上  │                    │  R2上  │  R2上  │  R3上  │  R4上  │  R5上  │
-  //│   1    │   2    │   3    │   4    │   5    │                    │   6    │   7    │   8    │   9    │   0    │
-      KC_1    , KC_2    , KC_3    , KC_4    , KC_5    ,                       KC_6    , KC_7    , KC_8    , KC_9    , KC_0    ,
+  //│   `    │   ~    │   '    │   "    │  Esc   │                    │   -    │   ←    │   ↑    │   →    │   \    │
+      GRAVE   , TILDE   , QUOTE   , DQUOTE  , KC_ESC  ,                       MINUS   , NAV_L   , NAV_U   , NAV_R   , BACKSLS ,
   //├────────┼────────┼────────┼────────┼────────┤                    ├────────┼────────┼────────┼────────┼────────┤
-  //│  L5中  │  L4中  │  L3中  │  L2中  │  L2中  │                    │  R2中  │  R2中  │  R3中  │  R4中  │  R5中  │
-  //│   [    │   (    │   {    │   =    │  ESC   │                    │   -    │   }    │   )    │   ]    │   :    │
-      BRACK_L , PAREN_L , BRACE_L , EQUAL   , KC_ESC  ,                       MINUS   , BRACE_R , PAREN_R , BRACK_R , COLON   ,
+  //│   |    │  PgUp  │  PgDn  │        │        │                    │   [    │   ]    │   (    │   )    │   {    │
+      PIPE    , KC_PGUP , KC_PGDN , XXX     , XXX     ,                       BRACK_L , BRACK_R , PAREN_L , PAREN_R , BRACE_L ,
   //├────────┼────────┼────────┼────────┼────────┤                    ├────────┼────────┼────────┼────────┼────────┤
-  //│  L5下  │  L4下  │  L3下  │  L2下  │  L2下  │                    │  R2下  │  R2下  │  R3下  │  R4下  │  R5下  │
-  //│  Home  │  End   │  PgUp  │  PgDn  │   _    │                    │   ←    │   ↓    │   ↑    │   →    │   /    │
-      KC_HOME , KC_END  , KC_PGUP , KC_PGDN , UNDER   ,                       NAV_L   , NAV_D   , NAV_U   , NAV_R   , KC_SLSH ,
+  //│        │  Home  │  End   │        │        │                    │   _    │   :    │   =    │   +    │   /    │
+      XXX     , KC_HOME , KC_END  , XXX     , XXX     ,                       UNDER   , COLON   , EQUAL   , KC_PLUS , KC_SLSH ,
   //╰────────┴────────┴────────┼────────┼────────┼────────╮  ╭────────┼────────┼────────┴────────┴────────┴────────╯
-  //                            │  L1①  │  L1②  │  L1③  │  │  R1①  │  R1②  │
-  //                            │   `    │   ~    │   '    │  │        │   ;    │
-                                  GRAVE   , TILDE   , QUOTE   ,          ___     , KC_SCLN ,
+  //                            │  無効  │  無効  │        │  │   }    │  Del   │
+                                  XXX     , XXX     , XXX     ,          BRACE_R , KC_DEL  ,
   //                            ├────────┼────────┼────────┤  ├────────┼────────┤
-  //                            │  L1④  │  L1⑤  │  L1⑥  │  │        │  R1③  │
-  //                            │   "    │  透過  │  透過  │  │        │   \    │
-                                            DQUOTE  , ___     , ___     ,          BACKSLS
+  //                            │  透過  │        │   ;    │  │        │  無効  │
+                                            ___     , XXX     , KC_SCLN ,          XXX
   //                            ╰────────┴────────┴────────╯  ╰────────┴────────╯
   ),
 
   // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-  // Layer 2: Settings（設定・ファンクション・マウス）
+  // Layer 2: 数字テンキー（左親指⑤でアクティブ）
   // 
-  // Q+Wコンボで起動（押している間有効）
-  // - ファンクションキー（F1-F12）
-  // - マウスボタン（右手中段）
-  // - CPI調整、スクロールモード切替
+  // 【設計】左手でレイヤー保持、右手でテンキー入力
+  // 右手配置：
+  //   7 8 9
+  //   4 5 6
+  //   1 2 3
+  //     0
+  // R5中：Enter（数字入力後の確定に便利）
   // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
   [2] = LAYOUT_right_ball(
   //╭────────┬────────┬────────┬────────┬────────╮                    ╭────────┬────────┬────────┬────────┬────────╮
-  //│  L5上  │  L4上  │  L3上  │  L2上  │  L2上  │                    │  R2上  │  R2上  │  R3上  │  R4上  │  R5上  │
-  //│   F1   │   F2   │   F3   │   F4   │   F5   │                    │   F6   │   F7   │   F8   │   F9   │  F10   │
-      KC_F1   , KC_F2   , KC_F3   , KC_F4   , KC_F5   ,                       KC_F6   , KC_F7   , KC_F8   , KC_F9   , KC_F10  ,
+      XXX     , XXX     , XXX     , XXX     , XXX     ,                       XXX     , KC_7    , KC_8    , KC_9    , XXX     ,
   //├────────┼────────┼────────┼────────┼────────┤                    ├────────┼────────┼────────┼────────┼────────┤
-  //│  L5中  │  L4中  │  L3中  │  L2中  │  L2中  │                    │  R2中  │  R2中  │  R3中  │  R4中  │  R5中  │
-  //│   !    │   @    │   #    │   $    │   %    │                    │  左Clk │  右Clk │  中Clk │  F11   │  F12   │
-      KC_EXLM , KC_AT   , KC_HASH , KC_DLR  , KC_PERC ,                       KC_BTN1 , KC_BTN2 , KC_BTN3 , KC_F11  , KC_F12  ,
+      XXX     , XXX     , XXX     , XXX     , XXX     ,                       XXX     , KC_4    , KC_5    , KC_6    , KC_ENT  ,
   //├────────┼────────┼────────┼────────┼────────┤                    ├────────┼────────┼────────┼────────┼────────┤
-  //│  L5下  │  L4下  │  L3下  │  L2下  │  L2下  │                    │  R2下  │  R2下  │  R3下  │  R4下  │  R5下  │
-  //│   ^    │   &    │   *    │   +    │   |    │                    │ CPI-  │  CPI+  │ スクロ │  自動  │  保存  │
-      KC_CIRC , KC_AMPR , KC_ASTR , KC_PLUS , PIPE    ,                       CPI_D100, CPI_I100, SCRL_TO , SSNP_FRE, KBC_SAVE,
+      XXX     , XXX     , XXX     , XXX     , XXX     ,                       XXX     , KC_1    , KC_2    , KC_3    , XXX     ,
   //╰────────┴────────┴────────┼────────┼────────┼────────╮  ╭────────┼────────┼────────┴────────┴────────┴────────╯
-  //                            │  L1①  │  L1②  │  L1③  │  │  R1①  │  R1②  │
-  //                            │ BOOT  │ RESET │  RGB   │  │  無効  │  無効  │
-                                  QK_BOOT , KBC_RST , RGB_TOG ,          XXX     , XXX     ,
+                                  XXX     , XXX     , XXX     ,          KC_0    , XXX     ,
   //                            ├────────┼────────┼────────┤  ├────────┼────────┤
-  //                            │  L1④  │  L1⑤  │  L1⑥  │  │        │  R1③  │
-  //                            │  無効  │  無効  │  無効  │  │        │  無効  │
-                                            XXX     , XXX     , XXX     ,          XXX
+                                            XXX     , ___     , XXX     ,          XXX
+  //                            ╰────────┴────────┴────────╯  ╰────────┴────────╯
+  ),
+
+  // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  // Layer 3: 設定・ファンクション（左親指⑥でアクティブ）
+  // 
+  // 【設計】左手でレイヤー保持、右手で操作
+  // - ファンクションキー：F5、F10のみ
+  // - マウスボタン
+  // - CPI調整、スクロールモード
+  // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  [3] = LAYOUT_right_ball(
+  //╭────────┬────────┬────────┬────────┬────────╮                    ╭────────┬────────┬────────┬────────┬────────╮
+  //│        │        │        │        │   F5   │                    │  F10   │        │        │        │        │
+      XXX     , XXX     , XXX     , XXX     , KC_F5   ,                       KC_F10  , XXX     , XXX     , XXX     , XXX     ,
+  //├────────┼────────┼────────┼────────┼────────┤                    ├────────┼────────┼────────┼────────┼────────┤
+  //│   !    │   @    │   #    │   $    │   %    │                    │  左Clk │  右Clk │  中Clk │        │        │
+      KC_EXLM , KC_AT   , KC_HASH , KC_DLR  , KC_PERC ,                       KC_BTN1 , KC_BTN2 , KC_BTN3 , XXX     , XXX     ,
+  //├────────┼────────┼────────┼────────┼────────┤                    ├────────┼────────┼────────┼────────┼────────┤
+  //│   ^    │   &    │   *    │        │        │                    │ CPI-  │  CPI+  │ スクロ │  自動  │  保存  │
+      KC_CIRC , KC_AMPR , KC_ASTR , XXX     , XXX     ,                       CPI_D100, CPI_I100, SCRL_TO , SSNP_FRE, KBC_SAVE,
+  //╰────────┴────────┴────────┼────────┼────────┼────────╮  ╭────────┼────────┼────────┴────────┴────────┴────────╯
+                                  XXX     , XXX     , XXX     ,          XXX     , XXX     ,
+  //                            ├────────┼────────┼────────┤  ├────────┼────────┤
+  //                            │ BOOT  │ RESET │  透過  │  │        │  無効  │
+                                            QK_BOOT , KBC_RST , ___     ,          XXX
   //                            ╰────────┴────────┴────────╯  ╰────────┴────────╯
   ),
 };
@@ -203,9 +234,6 @@ const uint16_t PROGMEM keymaps[][MATRIX_ROWS][MATRIX_COLS] = {
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 // レイヤー状態管理
-// 
-// Layer 1でスクロールモードを有効化
-// トラックボールを転がすとスクロールとして動作
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 layer_state_t layer_state_set_user(layer_state_t state) {
     keyball_set_scroll_mode(get_highest_layer(state) == 1);
@@ -219,8 +247,8 @@ layer_state_t layer_state_set_user(layer_state_t state) {
 #    include "lib/oledkit/oledkit.h"
 
 void oledkit_render_info_user(void) {
-    keyball_oled_render_keyinfo();    // キー入力情報
-    keyball_oled_render_ballinfo();   // トラックボール情報
-    keyball_oled_render_layerinfo();  // レイヤー情報
+    keyball_oled_render_keyinfo();
+    keyball_oled_render_ballinfo();
+    keyball_oled_render_layerinfo();
 }
 #endif
