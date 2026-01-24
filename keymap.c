@@ -1,114 +1,311 @@
 /*
- * Keyball39 カスタムキーマップ 最終版
+ * Keyball39 Logitech Japanese Style Keymap
  * 
- * 【設計方針】
- * 1. 親指+人差し指で超頻繁な括弧を入力
- * 2. ホームポジションから指を離さない設計
- * 3. 使用頻度ベースの最適配置
+ *  Shift単押しの用途 → 基本的にない想定
+ *  Shift + 文字 → 大文字
+ *  Shift + 数字 → 記号（!@#$%など）
+ *  Shift + 矢印 → テキスト選択
+ *  Shift + Tab → 逆タブ
+ *  
+ * 【設計コンセプト】
+ * Logicool日本語キーボード風の配置にしたい
+ * - 右に「かな」で「かな」を教えている最中にもう一度押すと、再変換できる（これは欲しい）、スペース左に「英数」は仕方がない
+ * - Tap-Holdで1キー2役 
  * 
- * 【記号使用頻度】
- * 超頻繁：{} () [] : = -
- * 頻繁：_ " ' ; / \
- * やや頻繁：` ~ その他記号
+ * 【親指キー配置】Logicool風
+ * 左手: [無効] [無効] 英数/Cmd  Alt   ESC/L1  Tab/Ctrl
+ * 右手: かな/Shift  Space  [🔴]  [無効]
  * 
- * 【親指配置】
- * 左：Tab, 英数, Alt, Ctrl, Shift, L1
- * 右：Backspace, Space, [🔴], Enter
+ * 【Tap-Hold設計】
+ * - 英数/Cmd: 単押し=英数（IME OFF）、長押し=Cmd
+ * - ESC/L1: 単押し=ESC（Vim必須）、長押し=Layer1
+ * - Tab/Ctrl: 単押し=Tab、長押し=Ctrl
+ * - かな/Shift: 単押し=かな（IME ON）、長押し=Shift
+ * - Space: 単押し=Space（最頻出なのでシンプルに）
+ * 
+ * 【IME切り替え】Windows/Mac両対応！
+ * - 英数キー: Mac=英数 / Win=無変換 → IME OFF確定
+ * - かなキー: Mac=かな / Win=変換   → IME ON確定
+ * - 再変換: テキスト選択 → かなキー単押し
+ * 
+ * 【重要キーの入力方法】
+ * - Enter: L1 + 親指右（かな位置）
+ * - Backspace: L1 + P位置
+ * - Delete: L2 + P位置
+ * 
+ * 【Layer 2の起動】
+ * - Space長押し（右手親指）→ トラックボール操作しながらクリック、Vim記号
  */
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// Tap-Hold設定
+// 
+// TAPPING_TERM: 150ms（デフォルト200msより短く、反応良好）
+// PERMISSIVE_HOLD: 素早い操作でも修飾キーを確実に発動
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+#define TAPPING_TERM 150
+#define PERMISSIVE_HOLD
+#define KEYBALL_SCROLL_DIV_DEFAULT 16
 
 #include QMK_KEYBOARD_H
 #include "quantum.h"
+#include "os_detection.h"
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-// コンボ定義（5個）
-// Ctrl+Q、Alt+Qは削除（モディファイアとのコンボは動作しない）
+// カスタムキーコード（Windows/Mac両対応）
+// 
+// IME_OFF_CMD: 単押し=英数/無変換、長押し=Cmd
+// IME_ON_SFT:  単押し=かな/変換、長押し=Shift
+// APP_SW:      アプリ切替（Mac=Cmd+Tab / Win=Alt+Tab）
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-enum combos {
-    HJ_ENT,      // H+J → Enter（トラックボール誤爆防止）
-    QWE_EISU,    // Q+W+E → 英数（Mac）
-    ASD_KANA,    // A+S+D → かな（Mac）
-    ZXC_HZEN,    // Z+X+C → 半角/全角（Win）
-    QW_L2,       // Q+W → Layer 2（押している間）
-    COMBO_LENGTH
+enum custom_keycodes {
+    IME_OFF_CMD = SAFE_RANGE,  // 単押し=英数、長押し=Cmd
+    IME_ON_SFT,                // 単押し=かな、長押し=Shift
+    APP_SW,                    // アプリ切替（OS判定）
+    IME_TOGGLE,                // かな/英数トグル
+    OS_CTRL_GUI,               // OSでCmd/Ctrl切替
 };
-uint16_t COMBO_LEN = COMBO_LENGTH;
 
-// コンボキー定義
-const uint16_t PROGMEM hj_combo[] = {KC_H, KC_J, COMBO_END};
-const uint16_t PROGMEM qwe_combo[] = {KC_Q, KC_W, KC_E, COMBO_END};
-const uint16_t PROGMEM asd_combo[] = {KC_A, KC_S, KC_D, COMBO_END};
-const uint16_t PROGMEM zxc_combo[] = {KC_Z, KC_X, KC_C, COMBO_END};
-const uint16_t PROGMEM qw_combo[] = {KC_Q, KC_W, COMBO_END};
+// タイマー変数（Tap-Hold判定用）
+static uint16_t ime_on_sft_timer;
+static bool is_app_sw_active = false;
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// コンボ定義（マウスクリック）
+// 
+// J + K 同時押し → 左クリック
+// K + L 同時押し → 右クリック
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+const uint16_t PROGMEM combo_ime_toggle[] = {KC_F, KC_G, COMBO_END};
+
+const uint16_t PROGMEM combo_btn1[] = {KC_J, KC_K, COMBO_END};
+const uint16_t PROGMEM combo_btn2[] = {KC_K, KC_L, COMBO_END};
+const uint16_t PROGMEM combo_bsp[] = {KC_P, KC_L, COMBO_END}; // P+L = Backspace
 
 combo_t key_combos[] = {
-    [HJ_ENT]     = COMBO(hj_combo, KC_ENT),
-    [QWE_EISU]   = COMBO(qwe_combo, KC_LNG2),
-    [ASD_KANA]   = COMBO(asd_combo, KC_LNG1),
-    [ZXC_HZEN]   = COMBO(zxc_combo, KC_GRV),
-    [QW_L2]      = COMBO(qw_combo, MO(2)),
+  COMBO(combo_ime_toggle, IME_TOGGLE),  // F+G = IMEトグル（かな/英数）
+  COMBO(combo_btn1, KC_BTN1),           // J+K = 左クリック
+  COMBO(combo_btn2, KC_BTN2),           // K+L = 右クリック
+  COMBO(combo_bsp, KC_BSPC),            // P+L = Backspace
 };
 
 // clang-format off
 const uint16_t PROGMEM keymaps[][MATRIX_ROWS][MATRIX_COLS] = {
 
   // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-  // Layer 0: Base（通常入力）
+  // Layer 0: Base（QWERTY + Logicool風親指）
   // 
-  // 【LAYOUT_right_ball】右手にトラックボール
-  // 左手親指（6個）: Ctrl, 英数, Alt, Shift, L1, Tab
-  // 右手親指（3個）: Bsp, Space(長押しCmd), Enter
-  //                   [Bsp] [Spc/Cmd] [🔴] [Ent]
-  // ※ Enter は H+J コンボでも入力可能
+  // 【Logicoolの良いところを採用】
+  // - 英数キー: IMEを確実にOFFにできる
+  // - かなキー: IMEを確実にONにできる、かな
+  // - トグル式ではないので迷わない
+  // 
+  // 【親指Tap-Hold】
+  // - GUI_T(IME_OFF): 単押し=英数/無変換、長押し=Cmd
+  // - LT(1, KC_ESC): 単押し=ESC、長押し=L1
+  // - CTL_T(KC_TAB): 単押し=Tab、長押し=Ctrl
+  // - SFT_T(IME_ON): 単押し=かな/変換、長押し=Shift ※再変換も！
+  // - LT(2, KC_SPC): 単押し=Space、長押し=L2
   // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
   [0] = LAYOUT_right_ball(
+  //┌────────┬────────┬────────┬────────┬────────┐                          ┌────────┬────────┬────────┬────────┬────────┐
+  //│ Q      │ W      │ E      │ R      │ T      │                          │ Y      │ U      │ I      │ O      │ P      │
     KC_Q     , KC_W     , KC_E     , KC_R     , KC_T     ,                            KC_Y     , KC_U     , KC_I     , KC_O     , KC_P     ,
-    KC_A     , KC_S     , KC_D     , KC_F     , KC_G     ,                            KC_H     , KC_J     , KC_K     , KC_L     , KC_SCLN  ,
+  //├────────┼────────┼────────┼────────┼────────┤                          ├────────┼────────┼────────┼────────┼────────┤
+  //│ A      │ S      │ D      │ F      │ G      │                          │ H      │ J      │ K      │ L      │ Enter  │
+    KC_A     , KC_S     , KC_D     , KC_F     , KC_G     ,                            KC_H     , KC_J     , KC_K     , KC_L     , KC_ENT   ,
+  //├────────┼────────┼────────┼────────┼────────┤                          ├────────┼────────┼────────┼────────┼────────┤
+  //│ Z      │ X      │ C      │ V      │ B      │                          │ N      │ M      │ ,      │ .      │ /      │
     KC_Z     , KC_X     , KC_C     , KC_V     , KC_B     ,                            KC_N     , KC_M     , KC_COMM  , KC_DOT   , KC_SLSH  ,
-    KC_BSPC  , KC_LALT,   LGUI_T(KC_LNG2), KC_LCTL  , MO(1)    , KC_TAB   ,      KC_LSFT   , KC_SPC   ,                           KC_ENT
+  //┌────────┬────────┬────────────┬────────────┬────────────┬──────────────┐    ┌──────────────┬──────────┐       ┌────────┐
+  //│ 無効   │ 無効   │ XXXXXXX   │ Alt        │ ESC/L1     │ Tab/Ctrl     │    │ Space/L2   │ 再変換/Shift │ [🔴]  │ 無効   │
+    XXXXXXX  , XXXXXXX  , XXXXXXX, KC_LALT , LT(1,KC_ESC), OS_CTRL_GUI,      LT(2,KC_SPC), IME_ON_SFT,                  XXXXXXX
+  //└────────┴────────┴────────────┴────────────┴────────────┴──────────────┘    └──────────────┴────────┘       └────────┘
   ),
 
   // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-  // Layer 1: Lower（数字・記号・ナビゲーション）
+  // Layer 1: Symbols & Navigation（計算機風）
   // 
-  // 【配置戦略】
-  // - 数字：左手上段に1-5、右手上段に6-0
-  // - 超頻繁な括弧：人差し指ホームで入力
-  //   {} → L1 + FJ、() → L1 + DK、[] → L1 + SL
-  // - ナビゲーション：右手下段（矢印）、左手下段（ページ）
-  //
-  // 右手親指: Del, ;, Backslash
+  // 【左手】計算機配置
+  //        + 7 8 9 -
+  //        * 4 5 6 =
+  //        0 1 2 3 %
+  // 【右手】括弧類 {} [] + Vim矢印 + ' " 
+  // 【親指】Enter, _（アンダースコア）
   // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
   [1] = LAYOUT_right_ball(
-    KC_1     , KC_2     , KC_3     , KC_4     , KC_5     ,                            KC_6     , KC_7     , KC_8     , KC_9     , KC_0     ,
-    KC_LBRC  , KC_LPRN  , KC_LCBR  , KC_EQL   , KC_ESC   ,                            KC_MINS  , KC_RCBR  , KC_RPRN  , KC_RBRC  , KC_COLN  ,
-    KC_HOME  , KC_END   , KC_PGUP  , KC_PGDN  , KC_UNDS  ,                            KC_LEFT  , KC_DOWN  , KC_UP    , KC_RGHT  , KC_SLSH  ,
-    KC_GRV   , KC_TILD  , KC_QUOT  , KC_DQUO  , _______  , _______  ,      _______  , KC_SCLN  ,                               KC_BSLS
+  //┌────────┬────────┬────────┬────────┬────────┐                          ┌────────┬────────┬────────┬────────┬────────┐
+  //│ +      │ 7      │ 8      │ 9      │ -      │                          │ {      │ }      │ [      │ ]      │ Bsp    │
+    KC_PLUS  , KC_7     , KC_8     , KC_9     , KC_MINS  ,                            KC_LCBR  , KC_RCBR  , KC_LBRC  , KC_RBRC  , KC_BSPC  ,
+  //├────────┼────────┼────────┼────────┼────────┤                          ├────────┼────────┼────────┼────────┼────────┤
+  //│ *      │ 4      │ 5      │ 6      │ =      │                          │ ←      │ ↓      │ ↑      │ →      │ :      │
+    KC_ASTR  , KC_4     , KC_5     , KC_6     , KC_EQL   ,                            KC_LEFT  , KC_DOWN  , KC_UP    , KC_RGHT  , KC_COLN  ,
+  //├────────┼────────┼────────┼────────┼────────┤                          ├────────┼────────┼────────┼────────┼────────┤
+  //│ 0      │ 1      │ 2      │ 3      │ %      │                          │ (      │ )      │ '      │ "      │ |      │
+    KC_0     , KC_1     , KC_2     , KC_3     , KC_PERC  ,                            KC_LPRN  , KC_RPRN  , KC_QUOT  , KC_DQUO  , KC_PIPE  ,
+  //┌────────┬────────┬────────┬────────┬────────┬────────┐          ┌──────┬────────┐       ┌────────┐
+  //│ 無効   │ 無効   │ ___    │ ___    │ ___    │ ___    │          │ ___  │ _      │ [🔴]  │ 無効   │
+    XXXXXXX  , XXXXXXX  , _______  , _______  , _______  , _______  ,      _______  , KC_UNDS  ,                               XXXXXXX
+  //└────────┴────────┴────────┴────────┴────────┴────────┘          └──────┴────────┘       └────────┘
   ),
+  
 
   // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-  // Layer 2: Settings（設定・ファンクション・マウス）
+  // Layer 2: Selection & Settings & Shell/Vim記号
   // 
-  // Q+Wコンボで起動（押している間有効）
-  // - ファンクションキー（F1-F12）
-  // - マウスボタン（右手中段）
-  // - CPI調整、スクロールモード切替
+  // 【起動】Space長押し（右手親指）
+  // 【マウスクリック】コンボで実装！（J+K=左, K+L=右）
+  // 【シェル/Vim記号】
+  //   ! → shebang, 履歴展開(!!)
+  //   $ → 変数展開, Vim行末
+  //   ^ → Vim行頭
+  //   @ → SSH(user@host)
+  //   & → バックグラウンド実行
+  //   ` → コマンド置換
+  //   # → コメント, Vim単語検索
+  //   \ → エスケープ, パス
+  // 【左手上段】スクロール設定
+  // 【右手中段】Shift+矢印（選択移動）
   // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
   [2] = LAYOUT_right_ball(
-    KC_F1    , KC_F2    , KC_F3    , KC_F4    , KC_F5    ,                            KC_F6    , KC_F7    , KC_F8    , KC_F9    , KC_F10   ,
-    KC_EXLM  , KC_AT    , KC_HASH  , KC_DLR   , KC_PERC  ,                            KC_BTN1  , KC_BTN2  , KC_BTN3  , KC_F11   , KC_F12   ,
-    KC_CIRC  , KC_AMPR  , KC_ASTR  , KC_PLUS  , KC_PIPE  ,                            CPI_D100 , CPI_I100 , SCRL_TO  , SSNP_FRE , KBC_SAVE ,
-    QK_BOOT  , KBC_RST  , RGB_TOG  , XXXXXXX  , XXXXXXX  , XXXXXXX  ,      XXXXXXX  , XXXXXXX  ,                               XXXXXXX
+  //┌────────┬────────┬────────┬────────┬────────┐                          ┌────────┬────────┬────────┬────────┬────────┐
+  //│ AppSw  │ SCRL↕  │ SCRL↔  │ F5     │ F10    │                          │ ;      │ Home   │ End    │ Del    │ Bsp    │
+    APP_SW   , SSNP_VRT , SSNP_HOR , KC_F5    , KC_F10   ,                            KC_SCLN  , KC_HOME  , KC_END   , KC_DEL   , KC_BSPC  ,
+  //├────────┼────────┼────────┼────────┼────────┤                          ├────────┼────────┼────────┼────────┼────────┤
+  //│ !      │ $      │ ^      │ @      │ &      │                          │ S+←    │ S+↓    │ S+↑    │ S+→    │ ~      │
+    KC_EXLM  , KC_DLR   , KC_CIRC  , KC_AT    , KC_AMPR  ,                         S(KC_LEFT),S(KC_DOWN), S(KC_UP),S(KC_RGHT), KC_TILD  ,
+  //├────────┼────────┼────────┼────────┼────────┤                          ├────────┼────────┼────────┼────────┼────────┤
+  //│ `      │ #      │ \      │ <      │ >      │                          │ CPI-   │ CPI+   │ PgUp   │ PgDn   │ Ins    │
+    KC_GRV   , KC_HASH  , KC_BSLS  , KC_LABK  , KC_RABK  ,                            CPI_D100 , CPI_I100 , KC_PGUP  , KC_PGDN  , KC_INS   ,
+  //┌────────┬────────┬────────┬────────┬────────┬────────┐          ┌──────┬────────┐       ┌────────┐
+  //│ 無効   │ 無効   │ ___    │ ___    │ ___    │ ___    │          │ ___  │ SCRL   │ [🔴]  │ 無効   │
+    XXXXXXX  , XXXXXXX  , _______  , _______  , _______  , _______  ,      _______  , SCRL_TO  ,                               XXXXXXX
+  //└────────┴────────┴────────┴────────┴────────┴────────┘          └──────┴────────┘       └────────┘
   ),
 };
 // clang-format on
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// カスタムキー処理（Windows/Mac両対応）
+// 
+// 【IME_OFF_CMD】単押し=英数/無変換、長押し=Cmd
+// 【IME_ON_SFT】単押し=かな/変換、長押し=Shift
+// 【APP_SW】アプリ切替（Mac=Cmd+Tab / Win=Alt+Tab）
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// IMEトグル状態保持用
+static bool ime_toggle_state = false; // false: OFF(英数), true: ON(かな)
+
+bool process_record_user(uint16_t keycode, keyrecord_t *record) {
+    switch (keycode) {
+        // OSでCmd/Ctrl切替（親指キー）
+        case OS_CTRL_GUI:
+          if (record->event.pressed) {
+            switch (detected_host_os()) {
+              case OS_MACOS:
+              case OS_IOS:
+                register_code(KC_LGUI); // Cmd
+                break;
+              default:
+                register_code(KC_LCTL); // Ctrl
+                break;
+            }
+          } else {
+            switch (detected_host_os()) {
+              case OS_MACOS:
+              case OS_IOS:
+                unregister_code(KC_LGUI);
+                break;
+              default:
+                unregister_code(KC_LCTL);
+                break;
+            }
+          }
+          return false;
+        // かな/英数トグル
+        case IME_TOGGLE:
+          if (record->event.pressed) {
+            ime_toggle_state = !ime_toggle_state;
+            switch (detected_host_os()) {
+              case OS_MACOS:
+              case OS_IOS:
+                if (ime_toggle_state) {
+                  tap_code(KC_LNG1); // かな
+                } else {
+                  tap_code(KC_LNG2); // 英数
+                }
+                break;
+              default:
+                if (ime_toggle_state) {
+                  tap_code(KC_INT4); // 変換
+                } else {
+                  tap_code(KC_INT5); // 無変換
+                }
+                break;
+            }
+          }
+          return false;
+
+        // かな/Shift（カスタムTap-Hold）
+        case IME_ON_SFT:
+          if (record->event.pressed) {
+            ime_on_sft_timer = timer_read();
+          } else {
+            if (timer_elapsed(ime_on_sft_timer) < TAPPING_TERM) {
+              // タップ: 再変換のみ（かなキー送信しない）
+              tap_code(KC_INT4);  // 変換
+            } else {
+              // 長押し: Shiftのみ
+              register_code(KC_LSFT);
+              unregister_code(KC_LSFT);
+            }
+          }
+          return false;
+
+        // アプリ切替（Mac=Cmd+Tab / Win=Alt+Tab）
+        case APP_SW:
+            if (record->event.pressed) {
+                if (!is_app_sw_active) {
+                    is_app_sw_active = true;
+                    // OSに応じて修飾キーを切替
+                    switch (detected_host_os()) {
+                        case OS_MACOS:
+                        case OS_IOS:
+                            register_code(KC_LGUI);  // Cmd保持
+                            break;
+                        default:
+                            register_code(KC_LALT);  // Alt保持
+                            break;
+                    }
+                }
+                tap_code(KC_TAB);  // Tab送信
+            }
+            return false;
+    }
+    return true;
+}
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 // レイヤー状態管理
 // 
-// Layer 1でスクロールモードを有効化
-// トラックボールを転がすとスクロールとして動作
+// - Layer 1でスクロールモードを有効化
+// - Layer 2を離れたらアプリ切替を解放
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 layer_state_t layer_state_set_user(layer_state_t state) {
+    // L2を離れたらアプリ切替を解放
+    if (!layer_state_cmp(state, 2) && is_app_sw_active) {
+        // OSに応じて修飾キーを解放
+        switch (detected_host_os()) {
+            case OS_MACOS:
+            case OS_IOS:
+                unregister_code(KC_LGUI);
+                break;
+            default:
+                unregister_code(KC_LALT);
+                break;
+        }
+        is_app_sw_active = false;
+    }
+    
     keyball_set_scroll_mode(get_highest_layer(state) == 1);
     return state;
 }
@@ -120,8 +317,8 @@ layer_state_t layer_state_set_user(layer_state_t state) {
 #    include "lib/oledkit/oledkit.h"
 
 void oledkit_render_info_user(void) {
-    keyball_oled_render_keyinfo();    // キー入力情報
-    keyball_oled_render_ballinfo();   // トラックボール情報
-    keyball_oled_render_layerinfo();  // レイヤー情報
+    keyball_oled_render_keyinfo();
+    keyball_oled_render_ballinfo();
+    keyball_oled_render_layerinfo();
 }
 #endif
